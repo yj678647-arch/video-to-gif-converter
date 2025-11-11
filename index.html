@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video → GIF Converter</title>
+<style>
+:root{--bg:#f5f7fa;--card:#ffffff;--muted:#6b7280;--accent:#0b5fff}
+*{box-sizing:border-box}
+body{font-family:Inter, Roboto, Arial, sans-serif;background:var(--bg);margin:0;padding:22px;color:#111}
+.container{max-width:860px;margin:0 auto}
+h1{font-size:22px;margin-bottom:6px}
+.lead{margin-top:0;color:var(--muted)}
+.card{background:var(--card);padding:18px;border-radius:10px;box-shadow:0 6px 18px rgba(15,23,42,0.06);margin-top:12px}
+.field{display:block;margin-bottom:12px}
+.field input[type="file"]{margin-top:8px}
+.row{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.small{flex:0 0 200px;display:flex;flex-direction:column}
+.small input{margin-top:6px;padding:6px;border-radius:6px;border:1px solid #e5e7eb}
+.actions{margin-bottom:12px}
+.btn{padding:8px 12px;border-radius:8px;border:1px solid #d1d5db;background:#fff;cursor:pointer}
+.btn.primary{background:var(--accent);color:#fff;border:none}
+.btn:disabled{opacity:0.6;cursor:not-allowed}
+.status{font-size:13px;color:var(--muted);margin-bottom:8px}
+.preview img{display:block;margin-top:8px;border-radius:6px}
+.note{font-size:13px;color:var(--muted);margin-top:12px}
+.foot{margin-top:14px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main class="container">
+<h1>Video → GIF Converter</h1>
+<p class="lead">Upload a short video, convert it to GIF — clicking Download will also open an offer page in a new tab.</p>
+
+<div class="card">
+<label class="field">
+<span>Video File (MP4/WEBM)</span>
+<input id="videoFile" type="file" accept="video/*">
+</label>
+
+<div class="row">
+<label class="small">
+GIF Duration (seconds)
+<input id="gifDuration" type="number" min="1" max="20" value="5">
+</label>
+
+<label class="small">
+Frame Rate (fps)
+<input id="fps" type="number" min="1" max="30" value="10">
+</label>
+</div>
+
+<div class="actions">
+<button id="convertBtn" class="btn">Convert to GIF</button>
+<button id="downloadBtn" class="btn primary" disabled>Download GIF & Open Offer</button>
+</div>
+
+<div id="status" class="status"></div>
+<div id="preview" class="preview"></div>
+
+<p class="note">
+Note: Large videos may take longer to convert. If the offer page doesn't open automatically, you may need to open it manually.
+</p>
+</div>
+
+<footer class="foot">
+<small>Client-side conversion using GIF.js, ready for GitHub Pages.</small>
+</footer>
+</main>
+
+<!-- GIF.js library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.min.js"></script>
+<script>
+const ADSTERRA_URL = "https://www.effectivegatecpm.com/t705pmscru?key=d4d14a4f5868d6e7fc673d972b79b0fe";
+
+const videoInput = document.getElementById('videoFile');
+const convertBtn = document.getElementById('convertBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const preview = document.getElementById('preview');
+const status = document.getElementById('status');
+const fpsInput = document.getElementById('fps');
+const durInput = document.getElementById('gifDuration');
+
+let latestGifBlob = null;
+
+convertBtn.addEventListener('click', async () => {
+  const file = videoInput.files[0];
+  if (!file) { alert('Please select a video file.'); return; }
+
+  convertBtn.disabled = true;
+  convertBtn.textContent = 'Converting...';
+  status.textContent = 'Preparing...';
+  preview.innerHTML = '';
+
+  try {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.src = url;
+    video.crossOrigin = "anonymous";
+
+    await new Promise((res, rej) => {
+      video.addEventListener('loadedmetadata', () => res());
+      video.addEventListener('error', (e) => rej(e));
+    });
+
+    const desiredDuration = Math.min(video.duration, Number(durInput.value) || 5);
+    const fps = Math.max(1, Math.min(30, Number(fpsInput.value) || 10));
+    const frameInterval = 1 / fps;
+    const totalFrames = Math.min(200, Math.ceil(desiredDuration * fps));
+
+    const maxW = 480;
+    const scale = Math.min(1, maxW / (video.videoWidth || maxW));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.floor((video.videoWidth || maxW) * scale));
+    canvas.height = Math.max(1, Math.floor((video.videoHeight || 320) * scale));
+    const ctx = canvas.getContext('2d');
+
+    const gif = new GIF({
+      workers: 2,
+      quality: 10,
+      width: canvas.width,
+      height: canvas.height,
+      workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.min.js'
+    });
+
+    function seekVideo(videoEl, time) {
+      return new Promise((resolve) => {
+        const onSeeked = () => { videoEl.removeEventListener('seeked', onSeeked); setTimeout(resolve, 40); };
+        videoEl.addEventListener('seeked', onSeeked);
+        videoEl.currentTime = Math.min(time, Math.max(0, videoEl.duration - 0.001));
+        setTimeout(() => { videoEl.removeEventListener('seeked', onSeeked); resolve(); }, 1200);
+      });
+    }
+
+    for (let i = 0; i < totalFrames; i++) {
+      const t = (i / totalFrames) * desiredDuration;
+      status.textContent = `Capturing frames: ${i+1}/${totalFrames}`;
+      await seekVideo(video, t);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      gif.addFrame(canvas, { copy: true, delay: Math.round(1000 * frameInterval) });
+    }
+
+    gif.on('progress', (p) => {
+      const pct = Math.round(p * 100);
+      status.textContent = `Rendering GIF: ${pct}%`;
+      convertBtn.textContent = `Converting... ${pct}%`;
+    });
+
+    gif.on('finished', (blob) => {
+      latestGifBlob = blob;
+      const imgURL = URL.createObjectURL(blob);
+      preview.innerHTML = `<p>Preview:</p><img src="${imgURL}" alt="GIF preview" style="max-width:100%;border:1px solid #ddd;">`;
+      status.textContent = 'Ready — click Download to save GIF & open offer.';
+      downloadBtn.disabled = false;
+      convertBtn.disabled = false;
+      convertBtn.textContent = 'Convert to GIF';
+    });
+
+    gif.render();
+
+  } catch (err) {
+    console.error(err);
+    alert('Conversion error: ' + (err.message || err));
+    status.textContent = 'Error during conversion.';
+    convertBtn.disabled = false;
+    convertBtn.textContent = 'Convert to GIF';
+  }
+});
+
+downloadBtn.addEventListener('click', () => {
+  if (!latestGifBlob) return;
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(latestGifBlob);
+  a.download = 'converted.gif';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  try { window.open(ADSTERRA_URL, '_blank'); }
+  catch(err) {
+    if (confirm('Could not open offer in new tab. Open now?')) { window.location.href = ADSTERRA_URL; }
+  }
+});
+</script>
+</body>
+</html>
